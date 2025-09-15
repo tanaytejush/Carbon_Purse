@@ -46,6 +46,28 @@ npm run build
 npm run preview
 ```
 
+## Supabase (Auth + Database)
+
+This app now supports email/password login with Supabase and stores budgets, expenses, and settings in your Supabase Postgres database (protected by RLS). To enable:
+
+- Create a project at supabase.com and enable the Email provider in Authentication.
+- Create a `.env.local` file at the project root with:
+
+```
+VITE_SUPABASE_URL=https://YOUR_PROJECT_ID.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_PUBLIC_ANON_KEY
+```
+
+- Install the client SDK:
+
+```
+npm install @supabase/supabase-js
+```
+
+- Create these tables and RLS policies in the Supabase SQL editor (simplified): budgets, expenses, settings, each with a `user_id` column and RLS policies restricting access to `auth.uid() = user_id`.
+
+On first login, if your server data is empty and you have local data, the app offers to import it to your account. Export/Import JSON and CSV continue to work using your server-backed data.
+
 ## Usage Overview
 
 - Budgets: Set a monthly budget and see spent vs remaining. The “All Months” view aggregates budgets/expenses across months (editing budget is disabled there).

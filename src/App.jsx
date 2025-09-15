@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { supabase, hasSupabaseEnv } from './supabaseClient';
 
 const categories = [
   'Food','Transport','Housing','Utilities','Shopping','Entertainment','Health','Education','Other'
@@ -57,6 +58,17 @@ function useCurrencyFormatter(currency, locale) {
 }
 
 function monthKeyFromDateStr(dateStr) { return (dateStr || '').slice(0, 7); }
+function formatDDMM(dateStr) {
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d)) return '';
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    return `${dd}/${mm}`;
+  } catch {
+    return '';
+  }
+}
 function shiftMonth(key, delta) { const [y, m] = key.split('-').map(Number); const d = new Date(y, m - 1 + delta, 1); const yy = d.getFullYear(); const mm = String(d.getMonth()+1).padStart(2,'0'); return `${yy}-${mm}`; }
 
 function Header({ spent, budget, month, setMonth, fmt }) {
@@ -72,7 +84,7 @@ function Header({ spent, budget, month, setMonth, fmt }) {
         </div>
       </div>
       <div className="row" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+        <div className="row" style={{ alignItems: 'center', gap: 14 }}>
           <button className="btn ghost" onClick={() => setMonth('All')} title="View all months">All Months</button>
           <div className="btn-group">
             <button className="btn ghost icon" onClick={() => !isAll && setMonth(shiftMonth(month, -1))} disabled={isAll}>{'<'}</button>
@@ -84,7 +96,8 @@ function Header({ spent, budget, month, setMonth, fmt }) {
             value={isAll ? new Date().toISOString().slice(0,7) : month}
             disabled={isAll}
             onChange={e => setMonth(e.target.value)}
-            style={{ width: 160, minWidth: 160 }}
+            /* Allow full month names without clipping while staying responsive */
+            style={{ width: 200, minWidth: 200, maxWidth: '100%' }}
           />
         </div>
         <span className="pill stat">Spent: {fmt(spent || 0)}</span>
@@ -102,7 +115,7 @@ function BudgetCard({ budget, onUpdate, spent, fmt, editable = true }) {
   const remaining = Math.max(0, (budget || 0) - (spent || 0));
   const over = (budget || 0) < (spent || 0);
   return (
-    <div className="card" style={{ gridColumn: 'span 12' }}>
+    <div className="card col-12">
       <div className="card-header">
         <h3>Budget</h3>
         {editable && (!editing ? (
@@ -135,18 +148,18 @@ function BudgetCard({ budget, onUpdate, spent, fmt, editable = true }) {
   );
 }
 
-function AddExpense({ onAdd, month }) {
+function AddExpense({ onAdd, month, nameInputRef }) {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState(categories[0]);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0,10));
+  const [monthOnly, setMonthOnly] = useState(() => new Date().toISOString().slice(0,7));
   const [errors, setErrors] = useState({});
-  useEffect(() => {
-    const today = new Date();
-    const currentMonth = today.toISOString().slice(0,7);
-    if (month === 'All' || month === currentMonth) setDate(today.toISOString().slice(0,10));
-    else setDate(`${month}-01`);
-  }, [month]);
+  const dateInputRef = useRef(null);
+  // Always reflect today's date/month on mount; don't follow the header month filter
+  // Month field stays synced to the selected date below
+  // Keep month-only input in sync when date changes manually
+  useEffect(() => { setMonthOnly((date || '').slice(0,7)); }, [date]);
   function submit(e) {
     e.preventDefault();
     const nextErrors = {};
@@ -159,39 +172,96 @@ function AddExpense({ onAdd, month }) {
     setName(''); setAmount(''); setErrors({});
   }
   return (
-    <form className="card" onSubmit={submit} style={{ gridColumn: 'span 12' }}>
+    <form id="add-expense-form" className="card col-12 lg-col-7" onSubmit={submit}>
       <div className="card-header"><h3>Add Expense</h3></div>
       <div className="grid add-grid" style={{ gridTemplateColumns: 'repeat(12, 1fr)' }}>
-        <div className="add-name" style={{ gridColumn: 'span 5' }}>
-          <input
-            className={`input${errors.name ? ' error' : ''}`}
-            placeholder="What did you spend on?"
-            value={name}
-            onChange={e => { setName(e.target.value); if (errors.name) setErrors(prev => ({ ...prev, name: undefined })); }}
-            aria-invalid={!!errors.name}
-          />
-          {errors.name ? <div className="field-error">{errors.name}</div> : null}
+        <div className="add-name" style={{ gridColumn: 'span 4' }}>
+          <div className="field">
+            <label className="label" htmlFor="add-name">Expense</label>
+            <input
+              className={`input${errors.name ? ' error' : ''}`}
+              placeholder="What did you spend on?"
+              value={name}
+              ref={nameInputRef}
+              id="add-name"
+              onChange={e => { setName(e.target.value); if (errors.name) setErrors(prev => ({ ...prev, name: undefined })); }}
+              aria-invalid={!!errors.name}
+            />
+            {errors.name ? <div className="field-error">{errors.name}</div> : null}
+          </div>
         </div>
         <div className="add-amount" style={{ gridColumn: 'span 2' }}>
-          <input
-            className={`input${errors.amount ? ' error' : ''}`}
-            type="number"
-            step="0.01"
-            min="0"
-            placeholder="0.00"
-            value={amount}
-            onChange={e => { setAmount(e.target.value); if (errors.amount) setErrors(prev => ({ ...prev, amount: undefined })); }}
-            aria-invalid={!!errors.amount}
-          />
-          {errors.amount ? <div className="field-error">{errors.amount}</div> : null}
+          <div className="field">
+            <label className="label" htmlFor="add-amount">Amount</label>
+            <input
+              className={`input${errors.amount ? ' error' : ''}`}
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              value={amount}
+              id="add-amount"
+              onChange={e => { setAmount(e.target.value); if (errors.amount) setErrors(prev => ({ ...prev, amount: undefined })); }}
+              aria-invalid={!!errors.amount}
+            />
+            {errors.amount ? <div className="field-error">{errors.amount}</div> : null}
+          </div>
         </div>
-        <div className="add-category" style={{ gridColumn: 'span 3' }}>
-          <select className="select" value={category} onChange={e => setCategory(e.target.value)}>
-            {categories.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+        <div className="add-category" style={{ gridColumn: 'span 2' }}>
+          <div className="field">
+            <label className="label" htmlFor="add-category">Category</label>
+            <select id="add-category" className="select" value={category} onChange={e => setCategory(e.target.value)}>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
         </div>
+        {/* Month selector next to category */}
+        <div className="add-month" style={{ gridColumn: 'span 2' }}>
+          <div className="field">
+            <label className="label" htmlFor="add-month">Month</label>
+            <input
+              id="add-month"
+              className="input"
+              type="month"
+              value={monthOnly}
+              onChange={e => {
+                const nextMonth = e.target.value; // YYYY-MM
+                setMonthOnly(nextMonth);
+                // Keep the same day when possible; clamp to the month's last day if needed
+                const currentDay = Number(((date || '').slice(8,10)) || '01');
+                const [yStr, mStr] = nextMonth.split('-');
+                const y = Number(yStr);
+                const m = Number(mStr);
+                // last day of month: day 0 of next month
+                const lastDay = new Date(y, m, 0).getDate();
+                const clampedDay = Math.min(Math.max(currentDay, 1), lastDay);
+                const dd = String(clampedDay).padStart(2, '0');
+                const nextDate = `${nextMonth}-${dd}`;
+                setDate(nextDate);
+              }}
+            />
+          </div>
+        </div>
+        {/* Exact date selection with custom DD/MM display (year hidden) */}
         <div className="add-date" style={{ gridColumn: 'span 2' }}>
-          <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} />
+          <div className="field">
+            <label className="label" htmlFor="add-date">Date</label>
+            <div className="date-input-wrap">
+              <input
+                id="add-date"
+                ref={dateInputRef}
+                className="input"
+                type="date"
+                value={date}
+                onChange={e => setDate(e.target.value)}
+                aria-label="Select date"
+              />
+              {/* Overlay the date as DD/MM only (no year) */}
+              <div className="date-overlay" aria-hidden="true">
+                <span className="date-ddmm">{formatDDMM(date)}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div className="foot">
@@ -202,9 +272,9 @@ function AddExpense({ onAdd, month }) {
   );
 }
 
-function Filters({ query, setQuery, cat, setCat }) {
+function Filters({ query, setQuery, cat, setCat, className = '' }) {
   return (
-    <div className="card" style={{ gridColumn: 'span 12' }}>
+    <div className={`card col-12 lg-col-5${className ? ' ' + className : ''}`}>
       <div className="row" style={{ alignItems: 'center' }}>
         <input className="input" placeholder="Search by name" value={query} onChange={e => setQuery(e.target.value)} />
         <select className="select" value={cat} onChange={e => setCat(e.target.value)} style={{ maxWidth: 220 }}>
@@ -222,6 +292,7 @@ function ExpenseItem({ exp, onDelete, onUpdate, fmt }) {
   const [amount, setAmount] = useState(String(exp.amount));
   const [category, setCategory] = useState(exp.category);
   const [date, setDate] = useState(exp.date);
+  const dateRef = useRef(null);
   function save() {
     const amt = Number(amount);
     if (!name.trim() || !Number.isFinite(amt) || amt <= 0) return;
@@ -234,11 +305,11 @@ function ExpenseItem({ exp, onDelete, onUpdate, fmt }) {
         <>
           <div>
             <div className="name">{exp.name}</div>
-            <div className="meta">{exp.id.slice(-6)} • {exp.date}</div>
+            <div className="meta">{exp.id.slice(-6)}</div>
           </div>
           <div className="amount">{fmt(exp.amount)}</div>
           <div className="pill" style={{ justifySelf: 'start', textAlign: 'center' }}>{exp.category}</div>
-          <div className="meta">{new Date(exp.date).toLocaleDateString()}</div>
+          <div className="meta"><span aria-hidden="true">📅</span> {formatDDMM(exp.date)}</div>
           <div className="controls">
             <button className="btn ghost" onClick={() => setEdit(true)}>Edit</button>
             <button className="btn danger" onClick={() => onDelete(exp.id)}>Remove</button>
@@ -251,7 +322,13 @@ function ExpenseItem({ exp, onDelete, onUpdate, fmt }) {
           <select className="select" value={category} onChange={e => setCategory(e.target.value)}>
             {categories.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} />
+          <div className="date-input-wrap">
+            <input ref={dateRef} className="input" type="date" value={date} onChange={e => setDate(e.target.value)} />
+            <div className="date-overlay" aria-hidden="true">
+              <span className="date-ddmm">{formatDDMM(date)}</span>
+              <span className="date-year">{(() => { try { const d = new Date(date); return isNaN(d) ? '' : d.getFullYear(); } catch { return ''; } })()}</span>
+            </div>
+          </div>
           <div className="controls">
             <button className="btn ghost" onClick={() => { setEdit(false); setName(exp.name); setAmount(String(exp.amount)); setCategory(exp.category); setDate(exp.date); }}>Cancel</button>
             <button className="btn" onClick={save}>Save</button>
@@ -264,12 +341,12 @@ function ExpenseItem({ exp, onDelete, onUpdate, fmt }) {
 
 function ExpenseList({ items, onDelete, onUpdate, fmt }) {
   if (!items.length) return (
-    <div className="card" style={{ gridColumn: 'span 12', textAlign: 'center', color: 'var(--muted)' }}>
+    <div className="card col-12" style={{ textAlign: 'center', color: 'var(--muted)' }}>
       No expenses yet — add your first above.
     </div>
   );
   return (
-    <div className="card" style={{ gridColumn: 'span 12' }}>
+    <div className="card col-12 lg-col-8">
       <div className="card-header"><h3>Expenses</h3><span className="pill">{items.length} item(s)</span></div>
       <div className="list">
         {items.map(e => (
@@ -291,16 +368,17 @@ function Summary({ expenses, fmt }) {
   }, [expenses]);
   const total = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
   return (
-    <div className="card" style={{ gridColumn: 'span 12' }}>
+    <div className="card col-12 lg-col-4">
       <div className="card-header"><h3>Summary</h3></div>
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(12, 1fr)' }}>
-        <div style={{ gridColumn: 'span 6' }}>
-          <div className="stat"><div className="value">{fmt(total)}</div><div className="sub">Total Spent</div></div>
+      <div className="summary-top">
+        <div className="stat summary-spent">
+          <div className="value">{fmt(total)}</div>
+          <div className="sub">Total Spent</div>
         </div>
-        <div style={{ gridColumn: 'span 6' }}>
-          <div className="row" style={{ flexWrap: 'wrap' }}>
-            {byCat.map(([c, v]) => (<span key={c} className="pill">{c}: {fmt(v)}</span>))}
-          </div>
+        <div className="summary-pills">
+          {byCat.map(([c, v]) => (
+            <span key={c} className="pill">{c}: {fmt(v)}</span>
+          ))}
         </div>
       </div>
     </div>
@@ -310,7 +388,7 @@ function Summary({ expenses, fmt }) {
 function SettingsCard({ settings, setSettings, onExport, onImport, onExportCSV }) {
   const { locale, currency } = settings;
   return (
-    <div className="card" style={{ gridColumn: 'span 12' }}>
+    <div className="card col-12">
       <div className="card-header"><h3>Settings</h3></div>
       <div className="row" style={{ alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
         <div className="row" style={{ alignItems: 'center', gap: 12 }}>
@@ -333,36 +411,168 @@ function SettingsCard({ settings, setSettings, onExport, onImport, onExportCSV }
 }
 
 export default function App() {
-  const [budgets, setBudgets] = useLocalStorage('et_budgets', {});
-  const [expenses, setExpenses] = useLocalStorage('et_expenses', []);
-  const [settings, setSettings] = useSettings();
+  // Toasts
+  const [toasts, setToasts] = useState([]);
+  function notify(message, type = 'info', ttlMs = 3200) {
+    const id = Math.random().toString(36).slice(2);
+    setToasts(prev => [...prev, { id, message, type }]);
+    window.setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, ttlMs);
+  }
+
+  // Auth session
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // App state (server-backed)
+  const [budgets, setBudgets] = useState({}); // map of YYYY-MM -> amount
+  const [expenses, setExpenses] = useState([]);
+  const [settings, setSettings] = useSettings(); // keep locale/currency in localStorage too
   const [month, setMonth] = useLocalStorage('et_month', new Date().toISOString().slice(0,7));
+  // Ensure the app opens on the present month instead of an old persisted value
+  useEffect(() => {
+    const current = new Date().toISOString().slice(0,7);
+    if (month !== current) setMonth(current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState('All');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const addNameRef = React.useRef(null);
 
-  // migrate legacy single budget
+  // Setup auth session and listener
   useEffect(() => {
-    try {
-      const legacy = localStorage.getItem('et_budget');
-      if (legacy != null) {
-        const val = Number(JSON.parse(legacy)) || 0;
-        setBudgets(prev => ({ ...prev, [new Date().toISOString().slice(0,7)]: val }));
-        localStorage.removeItem('et_budget');
-      }
-    } catch {}
+    let mounted = true;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!mounted) return;
+      setSession(session || null);
+      setAuthLoading(false);
+    })();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session || null);
+    });
+    return () => { subscription.unsubscribe(); mounted = false; };
   }, []);
+
+  // Fetch server data when session present
+  useEffect(() => {
+    if (!session) { setExpenses([]); setBudgets({}); return; }
+    let cancelled = false;
+    async function load() {
+      const userId = session.user.id;
+      // budgets
+      const { data: bRows, error: bErr } = await supabase.from('budgets').select('*').eq('user_id', userId);
+      // expenses
+      const { data: eRows, error: eErr } = await supabase.from('expenses').select('*').eq('user_id', userId).order('date', { ascending: false });
+      // settings (optional, fallback to local settings)
+      const { data: sRows } = await supabase.from('settings').select('*').eq('user_id', userId).maybeSingle();
+
+      if (bErr || eErr) {
+        console.error('Failed to load data', bErr || eErr);
+        notify('Failed to load data. Try again.', 'error');
+        return;
+      }
+      if (cancelled) return;
+
+      const map = {};
+      for (const r of bRows || []) map[r.month] = Number(r.amount) || 0;
+      setBudgets(map);
+      setExpenses((eRows || []).map(r => ({
+        id: r.id,
+        name: r.name,
+        amount: Number(r.amount) || 0,
+        category: r.category,
+        date: r.date,
+      })));
+      if (sRows) {
+        setSettings(prev => {
+          const next = { ...prev };
+          if (typeof sRows.locale === 'string' && sRows.locale) next.locale = sRows.locale;
+          if (ALLOWED_CODES.includes(sRows.currency)) next.currency = sRows.currency;
+          return next;
+        });
+      }
+
+      // Optional: migrate from localStorage if server is empty and local has data
+      try {
+        const localExpensesRaw = localStorage.getItem('et_expenses');
+        const localBudgetsRaw = localStorage.getItem('et_budgets');
+        const hasServer = (eRows && eRows.length) || (bRows && bRows.length);
+        if (!hasServer && (localExpensesRaw || localBudgetsRaw)) {
+          // Ensure we don't prompt repeatedly: remember per-user decision
+          const migrationFlagKey = `et_migration_${userId}`;
+          const migrationFlag = localStorage.getItem(migrationFlagKey);
+          if (!migrationFlag) {
+            if (confirm('Import your local data to your account?')) {
+              const localExpenses = localExpensesRaw ? JSON.parse(localExpensesRaw) : [];
+              const localBudgets = localBudgetsRaw ? JSON.parse(localBudgetsRaw) : {};
+              if (Array.isArray(localExpenses) && localExpenses.length) {
+                const payload = localExpenses.map(e => ({ user_id: userId, name: e.name, amount: e.amount, category: e.category, date: e.date }));
+                // insert in chunks of 200
+                for (let i = 0; i < payload.length; i += 200) {
+                  await supabase.from('expenses').insert(payload.slice(i, i + 200));
+                }
+              }
+              const budgetRows = Object.entries(localBudgets).map(([m, a]) => ({ user_id: userId, month: m, amount: Number(a) || 0 }));
+              if (budgetRows.length) await supabase.from('budgets').upsert(budgetRows, { onConflict: 'user_id,month' });
+              await supabase.from('settings').upsert({ user_id: userId, locale: settings.locale, currency: settings.currency });
+              // Clear local-only copies now that data is on the server
+              try { localStorage.removeItem('et_expenses'); } catch {}
+              try { localStorage.removeItem('et_budgets'); } catch {}
+              // Mark migration as completed to avoid future prompts
+              try { localStorage.setItem(migrationFlagKey, 'done'); } catch {}
+              notify('Import complete. Reloading data...', 'success');
+              load();
+            } else {
+              // User dismissed — don't ask again automatically
+              try { localStorage.setItem(migrationFlagKey, 'dismissed'); } catch {}
+            }
+          }
+        }
+      } catch {}
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [session]);
 
   const fmt = useCurrencyFormatter(settings.currency, settings.locale);
   const filteredMonthly = useMemo(() => month === 'All' ? expenses.slice() : expenses.filter(e => monthKeyFromDateStr(e.date) === month), [expenses, month]);
   const spent = useMemo(() => filteredMonthly.reduce((s, e) => s + (Number(e.amount) || 0), 0), [filteredMonthly]);
   const filtered = useMemo(() => filteredMonthly.filter(e => (cat === 'All' || e.category === cat)).filter(e => e.name.toLowerCase().includes(query.trim().toLowerCase())).sort((a,b) => (a.date < b.date ? 1 : -1)), [filteredMonthly, cat, query]);
 
-  function addExpense(e) { setExpenses(prev => [e, ...prev]); }
-  function deleteExpense(id) { setExpenses(prev => prev.filter(e => e.id !== id)); }
-  function updateExpense(next) { setExpenses(prev => prev.map(e => e.id === next.id ? next : e)); }
+  async function addExpense(e) {
+    if (!session) return;
+    const userId = session.user.id;
+    const { data, error } = await supabase.from('expenses').insert({ user_id: userId, name: e.name, amount: e.amount, category: e.category, date: e.date }).select('*').single();
+    if (error) { notify('Failed to add expense', 'error'); return; }
+    setExpenses(prev => [{ id: data.id, name: data.name, amount: Number(data.amount) || 0, category: data.category, date: data.date }, ...prev]);
+  }
+  async function deleteExpense(id) {
+    if (!session) return;
+    const userId = session.user.id;
+    const { error } = await supabase.from('expenses').delete().eq('id', id).eq('user_id', userId);
+    if (error) { notify('Failed to remove expense', 'error'); return; }
+    setExpenses(prev => prev.filter(e => e.id !== id));
+  }
+  async function updateExpense(next) {
+    if (!session) return;
+    const userId = session.user.id;
+    const { error } = await supabase.from('expenses').update({ name: next.name, amount: next.amount, category: next.category, date: next.date }).eq('id', next.id).eq('user_id', userId);
+    if (error) { notify('Failed to save expense', 'error'); return; }
+    setExpenses(prev => prev.map(e => e.id === next.id ? next : e));
+  }
 
   const monthBudget = useMemo(() => month === 'All' ? Object.values(budgets || {}).reduce((s, v) => s + (Number(v) || 0), 0) : Number(budgets[month] || 0), [budgets, month]);
-  function updateMonthBudget(val) { setBudgets(prev => ({ ...prev, [month]: Math.max(0, Number(val) || 0) })); }
+  async function updateMonthBudget(val) {
+    if (!session) return;
+    const userId = session.user.id;
+    const amount = Math.max(0, Number(val) || 0);
+    const { error } = await supabase.from('budgets').upsert({ user_id: userId, month, amount }, { onConflict: 'user_id,month' });
+    if (error) { notify('Failed to save budget', 'error'); return; }
+    setBudgets(prev => ({ ...prev, [month]: amount }));
+  }
 
   function doExport() {
     const data = { budgets, expenses, settings, month };
@@ -387,18 +597,34 @@ export default function App() {
           if (!parsed.budgets || typeof parsed.budgets !== 'object') throw new Error('Missing budgets');
           if (!parsed.settings || typeof parsed.settings !== 'object') throw new Error('Missing settings');
           if (!confirm('Import will replace current data. Continue?')) return;
-          setBudgets(parsed.budgets || {});
-          setExpenses(parsed.expenses || []);
-          setSettings(prev => {
-            const next = { ...prev, ...(parsed.settings || {}) };
-            if (!ALLOWED_CODES.includes(next.currency)) next.currency = 'USD';
-            if (typeof next.locale !== 'string' || !next.locale) next.locale = prev.locale;
-            return next;
-          });
-          if (parsed.month && typeof parsed.month === 'string') setMonth(parsed.month);
-          alert('Import successful');
+          if (!session) throw new Error('Login required');
+          const userId = session.user.id;
+
+          // Replace server data with imported data
+          (async () => {
+            await supabase.from('expenses').delete().eq('user_id', userId);
+            await supabase.from('budgets').delete().eq('user_id', userId);
+            const expPayload = parsed.expenses.map(e => ({ user_id: userId, name: e.name, amount: Number(e.amount) || 0, category: e.category, date: e.date }));
+            for (let i = 0; i < expPayload.length; i += 200) {
+              await supabase.from('expenses').insert(expPayload.slice(i, i + 200));
+            }
+            const bRows = Object.entries(parsed.budgets).map(([m, a]) => ({ user_id: userId, month: m, amount: Number(a) || 0 }));
+            if (bRows.length) await supabase.from('budgets').upsert(bRows, { onConflict: 'user_id,month' });
+            const nextSettings = { ...settings, ...(parsed.settings || {}) };
+            if (!ALLOWED_CODES.includes(nextSettings.currency)) nextSettings.currency = 'USD';
+            if (typeof nextSettings.locale !== 'string' || !nextSettings.locale) nextSettings.locale = settings.locale;
+            await supabase.from('settings').upsert({ user_id: userId, locale: nextSettings.locale, currency: nextSettings.currency });
+            setSettings(nextSettings);
+            if (parsed.month && typeof parsed.month === 'string') setMonth(parsed.month);
+            notify('Import successful', 'success');
+            // reload from server
+            const { data: eRows } = await supabase.from('expenses').select('*').eq('user_id', userId).order('date', { ascending: false });
+            setExpenses((eRows || []).map(r => ({ id: r.id, name: r.name, amount: Number(r.amount) || 0, category: r.category, date: r.date })));
+            const { data: bRows2 } = await supabase.from('budgets').select('*').eq('user_id', userId);
+            const map = {}; for (const r of bRows2 || []) map[r.month] = Number(r.amount) || 0; setBudgets(map);
+          })().catch(() => notify('Import failed during upload', 'error'));
         } catch {
-          alert('Failed to import JSON');
+          notify('Failed to import JSON', 'error');
         }
       };
       reader.readAsText(file);
@@ -416,21 +642,156 @@ export default function App() {
     document.body.appendChild(a); a.click(); a.remove();
   }
 
+  // Auth UI
+  function AuthGate() {
+    const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [loading, setLoading] = useState(false);
+    async function submit(e) {
+      e.preventDefault(); setLoading(true);
+      try {
+        if (mode === 'signup') {
+          const { error } = await supabase.auth.signUp({ email, password });
+          if (error) throw error;
+          notify('Check your email to confirm sign up (if required).', 'info', 5000);
+        } else {
+          const { error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+        }
+      } catch (err) {
+        notify(err.message || 'Auth error', 'error');
+      } finally { setLoading(false); }
+    }
+    return (
+      <div className="container">
+        {/* Brand heading above auth area */}
+        <div className="auth-brand">
+          <div className="auth-logo" aria-hidden="true" />
+          <div className="auth-title">Carbon Purse</div>
+          <div className="auth-subtitle">( Your expense Tracker )</div>
+        </div>
+        {!hasSupabaseEnv ? (
+          <div className="card" style={{ maxWidth: 680, margin: '16px auto', borderColor: 'rgba(245, 158, 11, 0.35)' }}>
+            <div className="row" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="row" style={{ alignItems: 'center' }}>
+                <span className="pill" style={{ borderColor: 'rgba(245, 158, 11, 0.35)', color: '#fcd34d' }}>Warning</span>
+                <span className="meta">Supabase env vars are missing. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local.</span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <div className="card auth-card">
+          <div className="card-header">
+            <h3>{mode === 'signup' ? 'Create Account' : 'Sign In'}</h3>
+            <button className="btn ghost" onClick={() => setMode(m => m === 'signup' ? 'signin' : 'signup')}>
+              {mode === 'signup' ? 'Have an account?' : 'Create account'}
+            </button>
+          </div>
+          <form onSubmit={submit} className="row" style={{ flexDirection: 'column' }}>
+            <input className="input" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
+            <input className="input" type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required />
+            <button className="btn" type="submit" disabled={loading}>{loading ? 'Please wait…' : (mode === 'signup' ? 'Sign Up' : 'Sign In')}</button>
+          </form>
+        </div>
+        <div className="toast-container">
+          {toasts.map(t => (
+            <div key={t.id} className={`toast ${t.type}`}>{t.message}</div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (authLoading) return null;
+  if (!session) return <AuthGate />;
+
   return (
     <div className="container">
       <Header spent={spent} budget={monthBudget} month={month} setMonth={setMonth} fmt={fmt} />
       <div className="grid">
         <BudgetCard budget={monthBudget} onUpdate={updateMonthBudget} spent={spent} fmt={fmt} editable={month !== 'All'} />
-        <AddExpense onAdd={addExpense} month={month} />
-        <Filters query={query} setQuery={setQuery} cat={cat} setCat={setCat} />
+        <AddExpense onAdd={addExpense} month={month} nameInputRef={addNameRef} />
+        {/* Show grid filters on desktop only */}
+        <Filters query={query} setQuery={setQuery} cat={cat} setCat={setCat} className="hide-mobile" />
         <Summary expenses={filtered} fmt={fmt} />
-        <SettingsCard settings={settings} setSettings={setSettings} onExport={doExport} onImport={doImport} onExportCSV={doExportCSV} />
+        <SettingsCard
+          settings={settings}
+          setSettings={(updater) => {
+            setSettings(prev => {
+              const next = typeof updater === 'function' ? updater(prev) : updater;
+              if (session) {
+                supabase
+                  .from('settings')
+                  .upsert({ user_id: session.user.id, locale: next.locale, currency: next.currency })
+                  .catch(() => notify('Failed to save settings', 'error'));
+              }
+              return next;
+            });
+          }}
+          onExport={doExport}
+          onImport={doImport}
+          onExportCSV={doExportCSV}
+        />
         <ExpenseList items={filtered} onDelete={deleteExpense} onUpdate={updateExpense} fmt={fmt} />
       </div>
       <div className="foot">
-        <span>Data saved locally in your browser.</span>
-        <button className="btn warning" onClick={() => { if (confirm('Reset all data? This cannot be undone.')) { setBudgets({}); setExpenses([]); } }}>Reset</button>
+        <span>Signed in as {session.user.email}</span>
+        <div className="row">
+          <button className="btn warning" onClick={async () => {
+            if (!session) return;
+            if (confirm('Reset all data? This cannot be undone.')) {
+              const userId = session.user.id;
+              try {
+                await supabase.from('expenses').delete().eq('user_id', userId);
+                await supabase.from('budgets').delete().eq('user_id', userId);
+                setBudgets({}); setExpenses([]);
+                notify('All data cleared for this account', 'success');
+              } catch {
+                notify('Failed to reset data', 'error');
+              }
+            }
+          }}>Reset</button>
+          <button className="btn ghost" onClick={() => supabase.auth.signOut()}>Sign out</button>
+        </div>
       </div>
+      <div className="toast-container">
+        {toasts.map(t => (
+          <div key={t.id} className={`toast ${t.type}`}>{t.message}</div>
+        ))}
+      </div>
+
+      {/* Mobile floating actions */}
+      <button
+        className="btn fab show-mobile"
+        aria-label="Quick add expense"
+        onClick={() => {
+          const el = document.getElementById('add-expense-form');
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          window.setTimeout(() => { try { addNameRef.current && addNameRef.current.focus(); } catch {} }, 350);
+        }}
+      >+
+      </button>
+      <button
+        className="fab secondary show-mobile"
+        aria-label="Open filters"
+        onClick={() => setFiltersOpen(true)}
+      >Filters
+      </button>
+
+      {/* Mobile Filters Drawer */}
+      {filtersOpen ? (
+        <>
+          <div className="drawer-backdrop show-mobile" onClick={() => setFiltersOpen(false)} />
+          <div className="drawer-panel open show-mobile" role="dialog" aria-modal="true" aria-label="Filters">
+            <div className="card-header" style={{ marginBottom: 12 }}>
+              <h3>Filters</h3>
+              <button className="btn ghost" onClick={() => setFiltersOpen(false)}>Close</button>
+            </div>
+            <Filters query={query} setQuery={setQuery} cat={cat} setCat={setCat} />
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
