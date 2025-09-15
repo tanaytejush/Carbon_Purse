@@ -340,6 +340,8 @@ body {
   color: var(--text);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  overflow: hidden; /* prevent any text spill causing horizontal scroll */
+  text-overflow: ellipsis; /* safety for extreme zoom sizes */
   z-index: 1;
 }
 /* year is intentionally hidden from the overlay to keep things compact */
@@ -368,6 +370,32 @@ body {
 /* Firefox: increase end padding for its icon as well */
 @-moz-document url-prefix() {
   .input[type="date"], .input[type="month"] { padding-right: 44px; }
+}
+
+/* Month input overlay (Header): show Month + Year consistently */
+.month-input-wrap { position: relative; width: 100%; }
+.month-input-wrap .month-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  padding: 0 14px;
+  padding-right: 64px; /* allow room for the calendar indicator */
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  z-index: 1;
+}
+.month-input-wrap input[type="month"] { color: transparent; caret-color: transparent; }
+.month-input-wrap input[type="month"]::-webkit-datetime-edit,
+.month-input-wrap input[type="month"]::-webkit-datetime-edit-text,
+.month-input-wrap input[type="month"]::-webkit-datetime-edit-month-field,
+.month-input-wrap input[type="month"]::-webkit-datetime-edit-year-field { color: transparent; }
+@-moz-document url-prefix() {
+  .month-input-wrap input[type="month"] { color: transparent !important; }
 }
 
 .list {

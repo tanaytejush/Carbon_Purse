@@ -69,6 +69,14 @@ function formatDDMM(dateStr) {
     return '';
   }
 }
+function formatMonthYear(key) {
+  try {
+    if (!key || typeof key !== 'string' || key.length < 7) return '';
+    const d = new Date(key + '-01T00:00:00');
+    if (isNaN(d)) return '';
+    return d.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+  } catch { return ''; }
+}
 function shiftMonth(key, delta) { const [y, m] = key.split('-').map(Number); const d = new Date(y, m - 1 + delta, 1); const yy = d.getFullYear(); const mm = String(d.getMonth()+1).padStart(2,'0'); return `${yy}-${mm}`; }
 
 function Header({ spent, budget, month, setMonth, fmt }) {
@@ -90,15 +98,20 @@ function Header({ spent, budget, month, setMonth, fmt }) {
             <button className="btn ghost icon" onClick={() => !isAll && setMonth(shiftMonth(month, -1))} disabled={isAll}>{'<'}</button>
             <button className="btn ghost icon" onClick={() => !isAll && setMonth(shiftMonth(month, 1))} disabled={isAll}>{'>'}</button>
           </div>
-          <input
-            className="input"
-            type="month"
-            value={isAll ? new Date().toISOString().slice(0,7) : month}
-            disabled={isAll}
-            onChange={e => setMonth(e.target.value)}
-            /* Allow full month names without clipping while staying responsive */
-            style={{ width: 200, minWidth: 200, maxWidth: '100%' }}
-          />
+          <div className="month-input-wrap" style={{ width: 'clamp(180px, 30vw, 260px)', maxWidth: '100%' }}>
+            <input
+              className="input"
+              type="month"
+              value={isAll ? new Date().toISOString().slice(0,7) : month}
+              disabled={isAll}
+              onChange={e => setMonth(e.target.value)}
+              aria-label="Select month"
+              style={{ width: '100%' }}
+            />
+            <div className="month-overlay" aria-hidden="true">
+              {isAll ? 'All Months' : formatMonthYear(month)}
+            </div>
+          </div>
         </div>
         <span className="pill stat">Spent: {fmt(spent || 0)}</span>
         <span className="pill stat">Budget: {fmt(budget || 0)}</span>
