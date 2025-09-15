@@ -153,13 +153,12 @@ function AddExpense({ onAdd, month, nameInputRef }) {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState(categories[0]);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0,10));
-  const [monthOnly, setMonthOnly] = useState(() => new Date().toISOString().slice(0,7));
   const [errors, setErrors] = useState({});
   const dateInputRef = useRef(null);
   // Always reflect today's date/month on mount; don't follow the header month filter
   // Month field stays synced to the selected date below
   // Keep month-only input in sync when date changes manually
-  useEffect(() => { setMonthOnly((date || '').slice(0,7)); }, [date]);
+  // Removed month-only input; date field remains the single source of truth
   function submit(e) {
     e.preventDefault();
     const nextErrors = {};
@@ -207,7 +206,7 @@ function AddExpense({ onAdd, month, nameInputRef }) {
             {errors.amount ? <div className="field-error">{errors.amount}</div> : null}
           </div>
         </div>
-        <div className="add-category" style={{ gridColumn: 'span 2' }}>
+        <div className="add-category" style={{ gridColumn: 'span 3' }}>
           <div className="field">
             <label className="label" htmlFor="add-category">Category</label>
             <select id="add-category" className="select" value={category} onChange={e => setCategory(e.target.value)}>
@@ -215,35 +214,8 @@ function AddExpense({ onAdd, month, nameInputRef }) {
             </select>
           </div>
         </div>
-        {/* Month selector next to category */}
-        <div className="add-month" style={{ gridColumn: 'span 2' }}>
-          <div className="field">
-            <label className="label" htmlFor="add-month">Month</label>
-            <input
-              id="add-month"
-              className="input"
-              type="month"
-              value={monthOnly}
-              onChange={e => {
-                const nextMonth = e.target.value; // YYYY-MM
-                setMonthOnly(nextMonth);
-                // Keep the same day when possible; clamp to the month's last day if needed
-                const currentDay = Number(((date || '').slice(8,10)) || '01');
-                const [yStr, mStr] = nextMonth.split('-');
-                const y = Number(yStr);
-                const m = Number(mStr);
-                // last day of month: day 0 of next month
-                const lastDay = new Date(y, m, 0).getDate();
-                const clampedDay = Math.min(Math.max(currentDay, 1), lastDay);
-                const dd = String(clampedDay).padStart(2, '0');
-                const nextDate = `${nextMonth}-${dd}`;
-                setDate(nextDate);
-              }}
-            />
-          </div>
-        </div>
         {/* Exact date selection with custom DD/MM display (year hidden) */}
-        <div className="add-date" style={{ gridColumn: 'span 2' }}>
+        <div className="add-date" style={{ gridColumn: 'span 3' }}>
           <div className="field">
             <label className="label" htmlFor="add-date">Date</label>
             <div className="date-input-wrap">
