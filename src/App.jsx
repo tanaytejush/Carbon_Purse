@@ -19,7 +19,7 @@ function useLocalStorage(key, initial) {
   return [state, setState];
 }
 
-// Currency handling (restricted to four options)
+// Currency handling (restricted to five options)
 const ALLOWED_CURRENCIES = [
   { code: 'USD', label: 'Dollars (USD)' },
   { code: 'GBP', label: 'Pounds (GBP)' },
@@ -140,6 +140,7 @@ function AddExpense({ onAdd, month }) {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState(categories[0]);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0,10));
+  const [errors, setErrors] = useState({});
   useEffect(() => {
     const today = new Date();
     const currentMonth = today.toISOString().slice(0,7);
@@ -148,27 +149,48 @@ function AddExpense({ onAdd, month }) {
   }, [month]);
   function submit(e) {
     e.preventDefault();
+    const nextErrors = {};
+    if (!name.trim()) nextErrors.name = 'Field required';
+    if (String(amount).trim() === '') nextErrors.amount = 'Field required';
     const amt = Number(amount);
-    if (!name.trim() || !Number.isFinite(amt) || amt <= 0) return;
+    if (!nextErrors.amount && (!Number.isFinite(amt) || amt <= 0)) nextErrors.amount = 'Enter a positive amount';
+    if (Object.keys(nextErrors).length) { setErrors(nextErrors); return; }
     onAdd({ id: uid(), name: name.trim(), amount: Math.round(amt * 100) / 100, category, date });
-    setName(''); setAmount('');
+    setName(''); setAmount(''); setErrors({});
   }
   return (
     <form className="card" onSubmit={submit} style={{ gridColumn: 'span 12' }}>
       <div className="card-header"><h3>Add Expense</h3></div>
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(12, 1fr)' }}>
-        <div style={{ gridColumn: 'span 5' }}>
-          <input className="input" placeholder="What did you spend on?" value={name} onChange={e => setName(e.target.value)} />
+      <div className="grid add-grid" style={{ gridTemplateColumns: 'repeat(12, 1fr)' }}>
+        <div className="add-name" style={{ gridColumn: 'span 5' }}>
+          <input
+            className={`input${errors.name ? ' error' : ''}`}
+            placeholder="What did you spend on?"
+            value={name}
+            onChange={e => { setName(e.target.value); if (errors.name) setErrors(prev => ({ ...prev, name: undefined })); }}
+            aria-invalid={!!errors.name}
+          />
+          {errors.name ? <div className="field-error">{errors.name}</div> : null}
         </div>
-        <div style={{ gridColumn: 'span 2' }}>
-          <input className="input" type="number" step="0.01" min="0" placeholder="0.00" value={amount} onChange={e => setAmount(e.target.value)} />
+        <div className="add-amount" style={{ gridColumn: 'span 2' }}>
+          <input
+            className={`input${errors.amount ? ' error' : ''}`}
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="0.00"
+            value={amount}
+            onChange={e => { setAmount(e.target.value); if (errors.amount) setErrors(prev => ({ ...prev, amount: undefined })); }}
+            aria-invalid={!!errors.amount}
+          />
+          {errors.amount ? <div className="field-error">{errors.amount}</div> : null}
         </div>
-        <div style={{ gridColumn: 'span 3' }}>
+        <div className="add-category" style={{ gridColumn: 'span 3' }}>
           <select className="select" value={category} onChange={e => setCategory(e.target.value)}>
             {categories.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
-        <div style={{ gridColumn: 'span 2' }}>
+        <div className="add-date" style={{ gridColumn: 'span 2' }}>
           <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} />
         </div>
       </div>
@@ -261,10 +283,13 @@ function ExpenseList({ items, onDelete, onUpdate, fmt }) {
 function Summary({ expenses, fmt }) {
   const byCat = useMemo(() => {
     const map = new Map();
-    for (const e of expenses) map.set(e.category, (map.get(e.category) || 0) + e.amount);
+    for (const e of expenses) {
+      const amt = Number(e.amount) || 0;
+      map.set(e.category, (map.get(e.category) || 0) + amt);
+    }
     return [...map.entries()].sort((a,b) => b[1] - a[1]).slice(0, 5);
   }, [expenses]);
-  const total = expenses.reduce((s, e) => s + e.amount, 0);
+  const total = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
   return (
     <div className="card" style={{ gridColumn: 'span 12' }}>
       <div className="card-header"><h3>Summary</h3></div>
@@ -364,7 +389,12 @@ export default function App() {
           if (!confirm('Import will replace current data. Continue?')) return;
           setBudgets(parsed.budgets || {});
           setExpenses(parsed.expenses || []);
-          setSettings(prev => ({ ...prev, ...(parsed.settings || {}) }));
+          setSettings(prev => {
+            const next = { ...prev, ...(parsed.settings || {}) };
+            if (!ALLOWED_CODES.includes(next.currency)) next.currency = 'USD';
+            if (typeof next.locale !== 'string' || !next.locale) next.locale = prev.locale;
+            return next;
+          });
           if (parsed.month && typeof parsed.month === 'string') setMonth(parsed.month);
           alert('Import successful');
         } catch {
