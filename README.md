@@ -115,3 +115,8 @@ CSV export columns: `id,name,category,date,amount,month,currency`
 ## License
 
 No license specified. Add one if you plan to share/distribute.
+
+
+---
+
+<sub>Made by [tanaytejush](https://github.com/tanaytejush)</sub>
